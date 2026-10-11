@@ -13,28 +13,37 @@ import ProductDetails from "./pages/ProductDetails";
 // Lab 04 — Wishlist
 import Wishlist from "./pages/Wishlist";
 
+// Lab 05 — Cart
+import Cart from "./pages/Cart";
+import { CartProvider } from "./context/CartContext";
+
 import "./App.css";
 
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Auth routes (Lab 02) */}
-        <Route path="/login"    element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/home"     element={<Home />} />
+      <CartProvider>
+        <Routes>
+          {/* Auth routes (Lab 02) */}
+          <Route path="/login"    element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/home"     element={<Home />} />
 
-        {/* Product catalog routes (Lab 03) */}
-        <Route path="/products"     element={<Products />} />
-        <Route path="/products/:id" element={<ProductDetails />} />
+          {/* Product catalog routes (Lab 03) */}
+          <Route path="/products"     element={<Products />} />
+          <Route path="/products/:id" element={<ProductDetails />} />
 
-        {/* Wishlist route (Lab 04) */}
-        <Route path="/wishlist" element={<Wishlist />} />
+          {/* Wishlist route (Lab 04) */}
+          <Route path="/wishlist" element={<Wishlist />} />
 
-        {/* Fallback */}
-        <Route path="/"  element={<Navigate to="/login" replace />} />
-        <Route path="*"  element={<Navigate to="/login" replace />} />
-      </Routes>
+          {/* Cart route (Lab 05) */}
+          <Route path="/cart" element={<Cart />} />
+
+          {/* Fallback */}
+          <Route path="/"  element={<Navigate to="/login" replace />} />
+          <Route path="*"  element={<Navigate to="/login" replace />} />
+        </Routes>
+      </CartProvider>
     </BrowserRouter>
   );
 }

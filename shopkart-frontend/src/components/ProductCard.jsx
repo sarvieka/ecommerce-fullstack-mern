@@ -1,19 +1,28 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
+import { useCart } from "../context/CartContext";
 
 /**
  * ProductCard
  * Receives a product object from the backend and renders it as an editorial card.
  * Navigates to /products/:id on "View Details" click.
  * Includes "Add to Wishlist" functionality connected to POST /wishlist/:productId.
+ * Includes "Add to Cart" functionality connected to CartContext.
  */
 const ProductCard = ({ product }) => {
   const navigate = useNavigate();
 
+  // Cart context
+  const { addToCart, isInCart } = useCart();
+
   // Wishlist action states: "idle" | "saving" | "saved" | "error"
   const [wishlistStatus, setWishlistStatus] = useState("idle");
   const [wishlistError, setWishlistError] = useState("");
+
+  // Cart action states: "idle" | "adding" | "error"
+  const [cartStatus, setCartStatus] = useState("idle");
+  const [cartError, setCartError] = useState("");
 
   // Determine stock status label and CSS class
   const getStockBadge = (stock) => {
@@ -55,6 +64,28 @@ const ProductCard = ({ product }) => {
     }
   };
 
+  const handleAddToCart = async (e) => {
+    e.stopPropagation(); // prevent card click navigation
+    if (cartStatus === "adding") return;
+
+    setCartStatus("adding");
+    setCartError("");
+
+    try {
+      await addToCart(product._id);
+      setCartStatus("idle");
+    } catch (err) {
+      if (err.response?.status === 401) {
+        navigate("/login");
+        return;
+      }
+      setCartStatus("error");
+      setCartError(
+        err.response?.data?.message || "Could not add to cart. Please try again."
+      );
+    }
+  };
+
   // Wishlist button label
   const getWishlistLabel = () => {
     switch (wishlistStatus) {
@@ -63,6 +94,14 @@ const ProductCard = ({ product }) => {
       case "error":  return "♡ Add to Wishlist";
       default:       return "♡ Add to Wishlist";
     }
+  };
+
+  // Cart button label
+  const getCartLabel = () => {
+    if (cartStatus === "adding") return "Adding...";
+    if (product.stock === 0) return "Out of Stock";
+    if (isInCart(product._id)) return "Add Another";
+    return "Add to Cart";
   };
 
   return (
@@ -108,6 +147,20 @@ const ProductCard = ({ product }) => {
         >
           View Details
         </button>
+      </div>
+
+      {/* Cart action */}
+      <div className="product-card-cart">
+        <button
+          className={`cart-btn ${isInCart(product._id) ? "in-cart" : ""}`}
+          onClick={handleAddToCart}
+          disabled={cartStatus === "adding" || product.stock === 0}
+        >
+          {getCartLabel()}
+        </button>
+        {cartStatus === "error" && cartError && (
+          <p className="cart-error-msg">{cartError}</p>
+        )}
       </div>
 
       {/* Wishlist action */}

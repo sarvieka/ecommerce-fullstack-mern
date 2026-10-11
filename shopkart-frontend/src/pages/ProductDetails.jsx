@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import { useCart } from "../context/CartContext";
 import api from "../services/api";
 
 /**
@@ -9,7 +10,7 @@ import api from "../services/api";
  * Reads :id from the URL via useParams().
  * Calls GET /products/:id to fetch the product from the real backend.
  * Displays all real product fields from MongoDB.
- * "Add to Cart" is UI-only — there is no cart backend in this lab.
+ * "Add to Cart" calls the cart API through CartContext.
  */
 const ProductDetails = () => {
   const { id } = useParams();
@@ -20,6 +21,11 @@ const ProductDetails = () => {
   const [error, setError] = useState("");
   const [notFound, setNotFound] = useState(false);
   const [quantity, setQuantity] = useState(1);
+
+  // Cart context
+  const { addToCart, isInCart } = useCart();
+  const [cartStatus, setCartStatus] = useState("idle"); // "idle" | "adding" | "added" | "error"
+  const [cartError, setCartError] = useState("");
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -55,6 +61,32 @@ const ProductDetails = () => {
   const decreaseQty = () => setQuantity((q) => Math.max(1, q - 1));
   const increaseQty = () =>
     setQuantity((q) => Math.min(product?.stock || 1, q + 1));
+
+  // Add to cart — calls API once per unit (the backend increments by 1 per call)
+  const handleAddToCart = async () => {
+    if (cartStatus === "adding") return;
+
+    setCartStatus("adding");
+    setCartError("");
+
+    try {
+      // Call add-to-cart once for each unit the user selected
+      for (let i = 0; i < quantity; i++) {
+        await addToCart(product._id);
+      }
+      setCartStatus("added");
+      setQuantity(1); // reset selector after successful add
+    } catch (err) {
+      if (err.response?.status === 401) {
+        navigate("/login");
+        return;
+      }
+      setCartStatus("error");
+      setCartError(
+        err.response?.data?.message || "Could not add to cart. Please try again."
+      );
+    }
+  };
 
   // Stock badge
   const getStockInfo = (stock) => {
@@ -123,6 +155,15 @@ const ProductDetails = () => {
   const stockInfo = getStockInfo(product.stock);
   const isOutOfStock = product.stock === 0;
 
+  // Cart button label
+  const getCartBtnLabel = () => {
+    if (cartStatus === "adding") return "Adding to Cart...";
+    if (isOutOfStock) return "Out of Stock";
+    if (cartStatus === "added") return "Added ✓ — Add More?";
+    if (isInCart(product._id)) return "Add More to Cart";
+    return "Add to Cart";
+  };
+
   return (
     <div className="details-page">
       <Navbar />
@@ -189,12 +230,12 @@ const ProductDetails = () => {
 
             <hr className="details-divider" />
 
-            {/* Add to Cart — UI only, no backend */}
+            {/* Add to Cart */}
             <div className="add-to-cart-section">
               {/* Quantity selector */}
               {!isOutOfStock && (
                 <div className="quantity-row">
-                  <button className="qty-btn" onClick={decreaseQty} aria-label="Decrease quantity">−</button>
+                  <button className="qty-btn" onClick={decreaseQty} disabled={cartStatus === "adding"} aria-label="Decrease quantity">−</button>
                   <input
                     className="qty-value"
                     type="number"
@@ -202,25 +243,29 @@ const ProductDetails = () => {
                     readOnly
                     aria-label="Quantity"
                   />
-                  <button className="qty-btn" onClick={increaseQty} aria-label="Increase quantity">+</button>
+                  <button className="qty-btn" onClick={increaseQty} disabled={cartStatus === "adding"} aria-label="Increase quantity">+</button>
                 </div>
               )}
 
-              {/* Add to cart button — UI only */}
+              {/* Add to cart button */}
               <button
                 className="add-to-cart-btn"
-                disabled={isOutOfStock}
-                onClick={() => {
-                  /* Cart functionality not yet implemented */
-                }}
+                disabled={isOutOfStock || cartStatus === "adding"}
+                onClick={handleAddToCart}
               >
-                {isOutOfStock ? "Out of Stock" : "Add to Cart"}
+                {getCartBtnLabel()}
               </button>
+
+              {cartStatus === "error" && cartError && (
+                <p className="add-to-cart-error">{cartError}</p>
+              )}
 
               <p className="add-to-cart-note">
                 {isOutOfStock
                   ? "This item is currently unavailable."
-                  : "Cart functionality coming soon."}
+                  : cartStatus === "added"
+                  ? "Item added to your cart!"
+                  : "Free shipping on all orders."}
               </p>
             </div>
           </div>

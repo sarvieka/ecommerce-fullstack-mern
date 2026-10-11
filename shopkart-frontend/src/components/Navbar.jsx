@@ -1,12 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import api from "../services/api";
+import { useCart } from "../context/CartContext";
 
 const Navbar = ({ wishlistCount: propCount }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [wishlistCount, setWishlistCount] = useState(0);
+
+  // Cart state from context
+  const { totalUnits, fetchCart } = useCart();
+
+  // Fetch cart on mount so the navbar count is always up-to-date
+  useEffect(() => {
+    fetchCart();
+  }, [fetchCart]);
 
   // Fetch wishlist count on mount (unless provided via props from Wishlist page)
   useEffect(() => {
@@ -62,6 +71,13 @@ const Navbar = ({ wishlistCount: propCount }) => {
         onClick={() => setMobileOpen(false)}
       >
         Wishlist{wishlistCount > 0 ? ` (${wishlistCount})` : ""}
+      </Link>
+      <Link
+        to="/cart"
+        className={`nav-link ${isActive("/cart") ? "active" : ""}`}
+        onClick={() => setMobileOpen(false)}
+      >
+        Cart{totalUnits > 0 ? ` (${totalUnits})` : ""}
       </Link>
       <div className="nav-separator" />
       <button onClick={() => { handleLogout(); setMobileOpen(false); }} className="logout-btn">
