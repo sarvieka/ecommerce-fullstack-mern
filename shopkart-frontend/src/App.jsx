@@ -15,6 +15,7 @@ import Wishlist from "./pages/Wishlist";
 
 // Lab 05 — Cart
 import Cart from "./pages/Cart";
+import Checkout from "./pages/Checkout";
 import { CartProvider } from "./context/CartContext";
 
 import "./App.css";
@@ -24,20 +25,23 @@ function App() {
     <BrowserRouter>
       <CartProvider>
         <Routes>
-          {/* Auth routes (Lab 02) */}
+          {/* Auth routes  */}
           <Route path="/login"    element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/home"     element={<Home />} />
 
-          {/* Product catalog routes (Lab 03) */}
+          {/* Product catalog routes  */}
           <Route path="/products"     element={<Products />} />
           <Route path="/products/:id" element={<ProductDetails />} />
 
-          {/* Wishlist route (Lab 04) */}
+          {/* Wishlist route */}
           <Route path="/wishlist" element={<Wishlist />} />
 
-          {/* Cart route (Lab 05) */}
+          {/* Cart route */}
           <Route path="/cart" element={<Cart />} />
+
+          {/* Checkout route */}
+          <Route path="/checkout" element={<Checkout />} />
 
           {/* Fallback */}
           <Route path="/"  element={<Navigate to="/login" replace />} />

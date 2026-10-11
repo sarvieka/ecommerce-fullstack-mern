@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { useCart } from "../context/CartContext";
-import api from "../services/api";
 
 /**
  * Cart Page
@@ -270,12 +269,12 @@ const Cart = () => {
             <span>Total</span>
             <span>₹{subtotal.toLocaleString("en-IN")}</span>
           </div>
-          <button className="btn-primary cart-checkout-btn" disabled>
-            Checkout
+          <button
+            className="btn-primary cart-checkout-btn"
+            onClick={() => navigate("/checkout")}
+          >
+            Proceed to Checkout
           </button>
-          <p className="cart-checkout-note">
-            Checkout functionality coming soon.
-          </p>
         </aside>
       </div>
     );
