@@ -79,6 +79,11 @@ export const CartProvider = ({ children }) => {
     [cartItems]
   );
 
+  // ── Clear cart ──────────────────────────────────────────
+  const clearCart = useCallback(() => {
+    setCartItems([]);
+  }, []);
+
   const value = {
     cartItems,
     loading,
@@ -86,6 +91,7 @@ export const CartProvider = ({ children }) => {
     totalUnits,
     subtotal,
     fetchCart,
+    clearCart,
     addToCart,
     updateQuantity,
     removeFromCart,

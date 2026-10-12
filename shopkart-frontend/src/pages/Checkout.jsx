@@ -1,17 +1,41 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { useCart } from "../context/CartContext";
+import api from "../services/api";
+
+/**
+ * Dynamically load the Razorpay Checkout script if not already present on window.
+ */
+const loadRazorpayScript = () => {
+  return new Promise((resolve) => {
+    if (window.Razorpay) {
+      resolve(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
 
 /**
  * Checkout Page
  *
- * Provides a shipping details form and an order summary of current cart items.
- * Uses shared CartContext state to read items and calculate order total.
- * Controlled form inputs capture the customer's shipping address with validation.
+ * Provides a shipping details form, order summary, and Razorpay payment integration.
+ * Flow:
+ * 1. Validate shipping address inputs
+ * 2. POST /orders/create-payment-order (ShopKart order + Razorpay order creation)
+ * 3. Open Razorpay Checkout modal
+ * 4. On payment success, POST /orders/verify-payment (HMAC signature verification)
+ * 5. On verification success, clear cart and navigate to order-success page
  */
 const Checkout = () => {
-  const { cartItems, loading, error, totalUnits, subtotal, fetchCart } = useCart();
+  const navigate = useNavigate();
+  const { cartItems, loading, error, totalUnits, subtotal, fetchCart, clearCart } = useCart();
 
   // Controlled shipping form state
   const [shippingDetails, setShippingDetails] = useState({
@@ -23,9 +47,10 @@ const Checkout = () => {
     pincode: "",
   });
 
-  // State for field-level and form-level validation errors
+  // Validation and payment processing states
   const [formErrors, setFormErrors] = useState({});
-  const [orderPlaced, setOrderPlaced] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
 
   // Ensure cart is fetched on component mount
   useEffect(() => {
@@ -40,7 +65,7 @@ const Checkout = () => {
       [name]: value,
     }));
 
-    // Clear the specific field error when the user updates/corrects the field
+    // Clear field-specific error as user types
     if (formErrors[name]) {
       setFormErrors((prev) => {
         const updated = { ...prev };
@@ -48,27 +73,25 @@ const Checkout = () => {
         return updated;
       });
     }
+
+    // Clear general payment error if any
+    if (paymentError) {
+      setPaymentError("");
+    }
   };
 
   /**
    * Validate shipping details form
-   *
-   * Rules:
-   * 1. No required field can be empty.
-   * 2. Whitespace-only input must be treated as empty/invalid (.trim()).
-   * 3. Phone must contain a valid number format (10-digit number).
-   * 4. Pincode must contain exactly 6 digits.
-   * 5. Returns boolean indicating validity.
    */
   const validateForm = () => {
     const errors = {};
 
-    // 1. Full Name: required, non-empty after trimming
+    // 1. Full Name
     if (!shippingDetails.fullName || shippingDetails.fullName.trim() === "") {
       errors.fullName = "Full Name is required.";
     }
 
-    // 2. Phone Number: required, non-empty, and valid format
+    // 2. Phone Number
     const trimmedPhone = (shippingDetails.phone || "").trim();
     if (!trimmedPhone) {
       errors.phone = "Phone Number is required.";
@@ -80,22 +103,22 @@ const Checkout = () => {
       }
     }
 
-    // 3. Address Line: required, non-empty after trimming
+    // 3. Address Line
     if (!shippingDetails.addressLine || shippingDetails.addressLine.trim() === "") {
       errors.addressLine = "Address Line is required.";
     }
 
-    // 4. City: required, non-empty after trimming
+    // 4. City
     if (!shippingDetails.city || shippingDetails.city.trim() === "") {
       errors.city = "City is required.";
     }
 
-    // 5. State: required, non-empty after trimming
+    // 5. State
     if (!shippingDetails.state || shippingDetails.state.trim() === "") {
       errors.state = "State is required.";
     }
 
-    // 6. Pincode: required, non-empty, exactly 6 digits
+    // 6. Pincode
     const trimmedPincode = (shippingDetails.pincode || "").trim();
     if (!trimmedPincode) {
       errors.pincode = "Pincode is required.";
@@ -108,70 +131,128 @@ const Checkout = () => {
   };
 
   /**
-   * "Place Order" submit handler
-   *
-   * Validates form inputs before proceeding.
-   * If validation fails, halts immediately to prevent any API/backend call.
+   * Place Order & Razorpay Checkout handler
    */
-  const handlePlaceOrder = (e) => {
+  const handlePlaceOrder = async (e) => {
     e.preventDefault();
 
-    if (cartItems.length === 0) {
+    if (cartItems.length === 0 || isProcessing) {
       return;
     }
 
-    // Validate inputs
+    setPaymentError("");
+
+    // 1. Validate form fields
     const isValid = validateForm();
     if (!isValid) {
-      // Validation failed: halt and do NOT call any backend API
       return;
     }
 
-    // Validation passed: proceed with order placement UI
-    setOrderPlaced(true);
+    setIsProcessing(true);
+
+    // 2. Dynamically load the Razorpay Checkout script
+    const scriptLoaded = await loadRazorpayScript();
+    if (!scriptLoaded) {
+      setIsProcessing(false);
+      setPaymentError("Failed to load Razorpay payment gateway. Please check your connection.");
+      return;
+    }
+
+    try {
+      // 3. Call backend to create payment order
+      const response = await api.post("/orders/create-payment-order", {
+        shippingAddress: {
+          fullName: shippingDetails.fullName.trim(),
+          phone: shippingDetails.phone.trim(),
+          addressLine: shippingDetails.addressLine.trim(),
+          city: shippingDetails.city.trim(),
+          state: shippingDetails.state.trim(),
+          pincode: shippingDetails.pincode.trim(),
+        },
+      });
+
+      const { order, razorpay: razorpayData } = response.data;
+      const shopKartOrderId = order.id;
+
+      // 4. Configure Razorpay options
+      const options = {
+        key: razorpayData.keyId,
+        amount: razorpayData.amount,
+        currency: razorpayData.currency,
+        name: "ShopKart",
+        description: "ShopKart Order Payment",
+        order_id: razorpayData.orderId,
+        prefill: {
+          name: shippingDetails.fullName.trim(),
+          contact: shippingDetails.phone.trim(),
+        },
+        theme: {
+          color: "#111111",
+        },
+        // 5. Handler called by Razorpay upon successful payment authorization
+        handler: async function (paymentResponse) {
+          try {
+            // 6. Call backend to verify HMAC signature
+            const verifyRes = await api.post("/orders/verify-payment", {
+              shopKartOrderId: shopKartOrderId,
+              razorpay_order_id: paymentResponse.razorpay_order_id,
+              razorpay_payment_id: paymentResponse.razorpay_payment_id,
+              razorpay_signature: paymentResponse.razorpay_signature,
+            });
+
+            if (verifyRes.data?.success) {
+              // 7. ONLY after successful signature verification:
+              //    clear the frontend cart state immediately so
+              //    the Navbar count drops to 0 before navigation.
+              //    fetchCart() is intentionally NOT called here —
+              //    the backend already cleared customer.cart, and
+              //    the Navbar on the next page will re-sync on mount.
+              clearCart();
+              setIsProcessing(false);
+              navigate(`/order-success/${shopKartOrderId}`, {
+                state: {
+                  orderId: shopKartOrderId,
+                  order: verifyRes.data.order,
+                },
+              });
+            } else {
+              setIsProcessing(false);
+              setPaymentError("Payment verification failed. Please contact support.");
+            }
+          } catch (verifyErr) {
+            setIsProcessing(false);
+            setPaymentError(
+              verifyErr.response?.data?.message ||
+              "Payment verification failed. Please contact support."
+            );
+          }
+        },
+        modal: {
+          // 8. Handle modal dismissal / cancellation by user
+          ondismiss: function () {
+            setIsProcessing(false);
+          },
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+
+      rzp.on("payment.failed", function (failResponse) {
+        setIsProcessing(false);
+        setPaymentError(
+          failResponse.error?.description || "Payment failed. Please try again."
+        );
+      });
+
+      rzp.open();
+
+    } catch (err) {
+      setIsProcessing(false);
+      setPaymentError(
+        err.response?.data?.message || "Unable to initiate payment. Please try again."
+      );
+    }
   };
-
-  // ── Render: Order Success View ────────────────────────────
-  if (orderPlaced) {
-    return (
-      <div className="checkout-page">
-        <Navbar />
-        <main className="checkout-container">
-          <div className="state-container">
-            <p className="state-eyebrow">Confirmation</p>
-            <h1 className="state-title">Order Placed Successfully!</h1>
-            <p className="state-sub">
-              Thank you, <strong>{shippingDetails.fullName}</strong>. Your order of{" "}
-              {totalUnits} {totalUnits === 1 ? "item" : "items"} totalling ₹
-              {subtotal.toLocaleString("en-IN")} has been received.
-            </p>
-
-            <div className="order-confirmation-details">
-              <h3>Shipping to:</h3>
-              <p>
-                {shippingDetails.fullName}
-                <br />
-                {shippingDetails.addressLine}
-                <br />
-                {shippingDetails.city}, {shippingDetails.state} — {shippingDetails.pincode}
-                <br />
-                Phone: {shippingDetails.phone}
-              </p>
-            </div>
-
-            <div style={{ marginTop: "24px", display: "flex", gap: "16px", justifyContent: "center" }}>
-              <Link to="/products" className="btn-primary">
-                Continue Shopping
-              </Link>
-              <Link to="/home" className="btn-secondary">
-                Return to Home
-              </Link>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
 
   // ── Render: Loading State ─────────────────────────────────
   if (loading && cartItems.length === 0) {
@@ -241,7 +322,7 @@ const Checkout = () => {
         <header className="page-header">
           <p className="page-eyebrow">ShopKart — Order</p>
           <h1>Checkout</h1>
-          <p>Please enter your shipping information and verify your order summary.</p>
+          <p>Please enter your shipping information and complete payment via Razorpay.</p>
         </header>
 
         <form onSubmit={handlePlaceOrder} noValidate>
@@ -253,10 +334,17 @@ const Checkout = () => {
                 <span className="checkout-step-badge">Step 1 of 2</span>
               </div>
 
-              {/* Form-level error alert */}
+              {/* Form-level validation error alert */}
               {Object.keys(formErrors).length > 0 && (
                 <div className="error-alert" role="alert" style={{ marginBottom: "20px" }}>
                   Please fix the highlighted errors below before placing your order.
+                </div>
+              )}
+
+              {/* Payment error alert */}
+              {paymentError && (
+                <div className="error-alert" role="alert" style={{ marginBottom: "20px" }}>
+                  {paymentError}
                 </div>
               )}
 
@@ -271,6 +359,7 @@ const Checkout = () => {
                     placeholder="e.g. John Doe"
                     value={shippingDetails.fullName}
                     onChange={handleInputChange}
+                    disabled={isProcessing}
                     className={formErrors.fullName ? "input-error" : ""}
                   />
                   {formErrors.fullName && (
@@ -288,6 +377,7 @@ const Checkout = () => {
                     placeholder="e.g. 9876543210"
                     value={shippingDetails.phone}
                     onChange={handleInputChange}
+                    disabled={isProcessing}
                     className={formErrors.phone ? "input-error" : ""}
                   />
                   {formErrors.phone && (
@@ -305,6 +395,7 @@ const Checkout = () => {
                     placeholder="Street address, flat, suite, building, etc."
                     value={shippingDetails.addressLine}
                     onChange={handleInputChange}
+                    disabled={isProcessing}
                     className={formErrors.addressLine ? "input-error" : ""}
                   />
                   {formErrors.addressLine && (
@@ -322,6 +413,7 @@ const Checkout = () => {
                     placeholder="e.g. Mumbai"
                     value={shippingDetails.city}
                     onChange={handleInputChange}
+                    disabled={isProcessing}
                     className={formErrors.city ? "input-error" : ""}
                   />
                   {formErrors.city && (
@@ -339,6 +431,7 @@ const Checkout = () => {
                     placeholder="e.g. Maharashtra"
                     value={shippingDetails.state}
                     onChange={handleInputChange}
+                    disabled={isProcessing}
                     className={formErrors.state ? "input-error" : ""}
                   />
                   {formErrors.state && (
@@ -356,6 +449,7 @@ const Checkout = () => {
                     placeholder="e.g. 400001"
                     value={shippingDetails.pincode}
                     onChange={handleInputChange}
+                    disabled={isProcessing}
                     className={formErrors.pincode ? "input-error" : ""}
                   />
                   {formErrors.pincode && (
@@ -431,8 +525,9 @@ const Checkout = () => {
               <button
                 type="submit"
                 className="btn-primary checkout-place-order-btn"
+                disabled={isProcessing}
               >
-                Place Order
+                {isProcessing ? "Processing..." : "Place Order"}
               </button>
 
               <p className="checkout-note">
