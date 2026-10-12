@@ -16,6 +16,7 @@ import Wishlist from "./pages/Wishlist";
 // Lab 05 — Cart
 import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
+import OrderSuccess from "./pages/OrderSuccess";
 import { CartProvider } from "./context/CartContext";
 
 import "./App.css";
@@ -42,6 +43,9 @@ function App() {
 
           {/* Checkout route */}
           <Route path="/checkout" element={<Checkout />} />
+
+          {/* Lab 06 — Order success route */}
+          <Route path="/order-success/:orderId" element={<OrderSuccess />} />
 
           {/* Fallback */}
           <Route path="/"  element={<Navigate to="/login" replace />} />
